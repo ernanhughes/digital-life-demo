@@ -1,9 +1,12 @@
 import "./styles.css";
 
+import { canonicalFiniteBudgetReplay } from "./replay";
 import { CrystalScene, type DemoMode } from "./scene";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Missing #app root");
+
+const replay = canonicalFiniteBudgetReplay;
 
 app.innerHTML = `
   <section class="hero">
@@ -31,29 +34,24 @@ app.innerHTML = `
         </button>
         <button class="control" data-mode="intervene">
           <span class="control-index">02</span>
-          <span><strong>Intervene</strong><small>Local cause → far-field change</small></span>
+          <span><strong>Intervene</strong><small>Canonical Ch14 finite-budget replay</small></span>
         </button>
         <button class="control" data-mode="damage">
           <span class="control-index">03</span>
-          <span><strong>Damage</strong><small>Remove material and watch return</small></span>
+          <span><strong>Damage</strong><small>Prototype: remove material and watch return</small></span>
         </button>
         <button class="control" data-mode="history">
           <span class="control-index">04</span>
-          <span><strong>History</strong><small>The past alters the future</small></span>
+          <span><strong>History</strong><small>Prototype: the past alters the future</small></span>
         </button>
       </div>
     </div>
 
-    <div class="evidence-strip">
-      <div><span>PROCESS</span><strong>ongoing</strong></div>
-      <div><span>FRONTIER</span><strong>active</strong></div>
-      <div><span>INTERVENTION</span><strong>local</strong></div>
-      <div><span>CONSEQUENCE</span><strong>distributed</strong></div>
-    </div>
+    <div class="evidence-strip" id="evidence-strip"></div>
 
-    <p class="prototype-note">
-      Visual-engine prototype. The next milestone replaces fixture dynamics with replay data
-      exported from the book's canonical experiments.
+    <p class="prototype-note" id="prototype-note">
+      The finite-budget intervention is now a scientific replay from the book's canonical experiment.
+      Observe, damage, and history still use development fixtures while their replay exports are added.
     </p>
   </section>
 `;
@@ -62,16 +60,35 @@ const sceneElement = document.querySelector<HTMLElement>("#scene");
 const canvas = document.querySelector<HTMLCanvasElement>("#crystal");
 const svg = document.querySelector<SVGSVGElement>("#overlay");
 const hint = document.querySelector<HTMLElement>("#scene-hint");
-if (!sceneElement || !canvas || !svg || !hint) throw new Error("Demo scene failed to mount");
+const evidence = document.querySelector<HTMLElement>("#evidence-strip");
+if (!sceneElement || !canvas || !svg || !hint || !evidence) {
+  throw new Error("Demo scene failed to mount");
+}
 
 const scene = new CrystalScene(canvas, svg);
 
 const hints: Record<DemoMode, string> = {
   observe: "The crystal is a process, not a still image.",
-  intervene: "Click anywhere on the crystal to apply a local intervention.",
-  damage: "Click to remove material. Watch the process refill the wound.",
-  history: "Click to imprint a history trace without replacing the geometry.",
+  intervene: "Replay a measured local intervention under a fixed global evaluation budget.",
+  damage: "Click to remove material. This scene is still a visual prototype.",
+  history: "Click to imprint a history trace. This scene is still a visual prototype.",
 };
+
+const genericEvidence = `
+  <div><span>PROCESS</span><strong>ongoing</strong></div>
+  <div><span>FRONTIER</span><strong>active</strong></div>
+  <div><span>INTERVENTION</span><strong>local</strong></div>
+  <div><span>CONSEQUENCE</span><strong>distributed</strong></div>
+`;
+
+const canonicalEvidence = `
+  <div><span>CANONICAL RUN</span><strong>seed ${replay.provenance.representativeSeed}</strong></div>
+  <div><span>FINITE B</span><strong>${replay.finiteBudget.budget} slots · f=${replay.finiteBudget.fraction.toFixed(2)}</strong></div>
+  <div><span>MEAN E<sub>far</sub></span><strong>${replay.measurements.meanEFar.toFixed(3)} · n=${replay.measurements.groups}</strong></div>
+  <div><span>FULL EVALUATION</span><strong>${replay.measurements.fullEvaluationEFar.toFixed(3)} · ${replay.measurements.fullEvaluationHardZero}</strong></div>
+`;
+
+evidence.innerHTML = genericEvidence;
 
 const resize = (): void => {
   const rect = sceneElement.getBoundingClientRect();
@@ -82,13 +99,20 @@ new ResizeObserver(resize).observe(sceneElement);
 resize();
 
 let lastInteraction = performance.now();
+let lastReplayStage = "";
+
+function updateModeUI(mode: DemoMode): void {
+  evidence.innerHTML = mode === "intervene" ? canonicalEvidence : genericEvidence;
+  document.querySelectorAll<HTMLButtonElement>(".control").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mode === mode);
+  });
+}
 
 function setMode(mode: DemoMode, triggerPreset = false): void {
   scene.setMode(mode);
   hint.textContent = hints[mode];
-  document.querySelectorAll<HTMLButtonElement>(".control").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === mode);
-  });
+  lastReplayStage = "";
+  updateModeUI(mode);
   if (triggerPreset && mode !== "observe") scene.triggerPreset(mode);
   lastInteraction = performance.now();
 }
@@ -112,11 +136,15 @@ sceneElement.addEventListener("pointerdown", (event) => {
 function frame(now: number): void {
   scene.render(now);
 
+  const replayStatus = scene.getCanonicalReplayStatus(now);
+  if (replayStatus && replayStatus.stage.id !== lastReplayStage) {
+    hint.textContent = `${replayStatus.stage.label} — ${replayStatus.stage.description}`;
+    lastReplayStage = replayStatus.stage.id;
+  }
+
   if (scene.getMode() === "observe" && now - lastInteraction > 2600) {
-    scene.triggerPreset("intervene", now);
-    hint.textContent = "A tiny local intervention redistributes opportunities far away.";
-    lastInteraction = now;
-  } else if (now - lastInteraction > 9000) {
+    setMode("intervene", true);
+  } else if (scene.getMode() !== "observe" && now - lastInteraction > 9500) {
     setMode("observe");
   }
 

@@ -2,18 +2,34 @@
 
 Interactive companion for **Digital Life From First Principles**.
 
-The goal is to turn the book's experimental argument into one continuous, explorable demonstration: a viewer should be able to watch the digital crystal persist, perturb it, damage it, give it a history, and eventually inspect the evidence behind each effect.
+The goal is to turn the book's experimental argument into one continuous, explorable demonstration: a viewer should be able to watch the digital crystal persist, perturb it, damage it, give it a history, and inspect the evidence behind each effect.
 
-## Current milestone: visual engine foundation
+## Current milestone: first canonical scientific replay
 
-This first slice establishes the browser experience:
+The browser now contains its first claim-bearing replay from the book rather than a hand-authored visual effect.
 
-- Canvas renders the evolving hexagonal crystal efficiently.
-- D3/SVG renders causal zones, labels, and far-field intervention markers.
-- Controls expose four initial scenes: observe, local intervention, damage, and history.
-- The page is designed to work as a Programmer.ie/book hero as well as a standalone demo.
+The **Intervene** scene replays the finite-budget redistribution experiment that appears in the current manuscript as Chapter 14, *Can Finite Computation Couple Distant Events?*
 
-**Important:** the current cell motion and event timing are development fixtures, not experimental evidence. The next milestone replaces fixture dynamics with canonical replay data exported from the book's Python experiments.
+It uses:
+
+- the representative frozen crystal selected by the canonical visualization script,
+- representative seed `2502`,
+- the actual intervention cell `x = (8, -8)`,
+- the real PREVENT/FORCE frontier sets,
+- the real `f = 0.25`, `B = 17` evaluated-candidate sets,
+- the real far-field selector swaps for that representative state,
+- the frozen aggregate result `mean E_far = -0.2614` for the FCP `+2` class (`n = 384` groups),
+- and the full-evaluation hard-zero control (`E_far = 0`, `PASS`).
+
+The underlying research lineage remains Chapter 25 in the experiment scripts because the manuscript was later compressed and reordered; the same result is now presented in current Chapter 14.
+
+### Scientific boundary
+
+Only the **Intervene** scene is currently a canonical scientific replay.
+
+**Observe**, **Damage**, and **History** still use development fixtures. They are intentionally labelled as prototypes in the UI until their own canonical replay exports are connected.
+
+Representative geometry and aggregate measurements are also kept distinct: the displayed checkpoint/selector membership comes from one deterministic representative state, while `E_far` is the aggregate frozen result across the experiment groups. The UI must not imply that the aggregate mean is the single representative state's measured value.
 
 ## Run locally
 
@@ -37,7 +53,7 @@ canonical Python experiments
 experiment replay JSON
         |
         v
-replay/state layer
+validated replay contract
         |
         +--------------------+
         |                    |
@@ -50,7 +66,25 @@ Canvas crystal renderer   D3/SVG evidence overlay
           interactive story UI
 ```
 
-The browser should remain a **scientific replay engine**, not an animation that invents results. Every claim-bearing visual state should ultimately be traceable to a named experiment, run, parameters, and measured output.
+The browser is a **scientific replay engine**, not an animation that invents results. Every claim-bearing visual state must be traceable to a named experiment, run, parameters, and measured output.
+
+## Replay data contract
+
+The first replay is checked in at:
+
+```text
+src/data/ch14-finite-budget-redistribution.json
+```
+
+It records five distinct kinds of information:
+
+1. **Provenance** — source repository, experiment script, visualization script, current manuscript chapter, seed and parameters.
+2. **Checkpoint geometry** — the occupied axial hex coordinates of the representative frozen crystal.
+3. **Intervention/frontier state** — focal cell, causal radius, PREVENT frontier and FORCE frontier.
+4. **Selector state** — finite budget, selected candidate sets, and far-field swapped-in/swapped-out cells.
+5. **Measurements** — aggregate `E_far`, confidence interval, group count, low-budget scaling status and the full-evaluation hard-zero control.
+
+`src/replay.ts` validates the schema boundary before the renderer receives the data.
 
 ## Planned story
 
@@ -59,8 +93,10 @@ The browser should remain a **scientific replay engine**, not an animation that 
 3. **History** — create two similar present states with different pasts.
 4. **Same intervention, different future** — demonstrate causal history dependence.
 5. **Material turnover** — replace substrate while tracking process continuity.
-6. **Finite-budget redistribution** — apply a local intervention and show distant selector-mediated changes.
+6. **Finite-budget redistribution** — **first canonical replay now connected**.
 7. **Evidence view** — link each scene to the corresponding chapter, notebook, parameters, and measurements.
+
+The next replay milestone should move earlier in the book and connect **formation/persistence** so the demo can begin building the book's argument in narrative order.
 
 ## Design rule
 
