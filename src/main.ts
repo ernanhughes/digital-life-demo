@@ -65,6 +65,12 @@ if (!sceneElement || !canvas || !svg || !hint || !evidence) {
   throw new Error("Demo scene failed to mount");
 }
 
+// Preserve the post-guard non-null types across callbacks. TypeScript does not
+// retain the querySelector narrowing for every outer-scope DOM reference once
+// those references are captured by functions that execute later.
+const hintElement = hint;
+const evidenceElement = evidence;
+
 const scene = new CrystalScene(canvas, svg);
 
 const hints: Record<DemoMode, string> = {
@@ -88,7 +94,7 @@ const canonicalEvidence = `
   <div><span>FULL EVALUATION</span><strong>${replay.measurements.fullEvaluationEFar.toFixed(3)} · ${replay.measurements.fullEvaluationHardZero}</strong></div>
 `;
 
-evidence.innerHTML = genericEvidence;
+evidenceElement.innerHTML = genericEvidence;
 
 const resize = (): void => {
   const rect = sceneElement.getBoundingClientRect();
@@ -102,7 +108,7 @@ let lastInteraction = performance.now();
 let lastReplayStage = "";
 
 function updateModeUI(mode: DemoMode): void {
-  evidence.innerHTML = mode === "intervene" ? canonicalEvidence : genericEvidence;
+  evidenceElement.innerHTML = mode === "intervene" ? canonicalEvidence : genericEvidence;
   document.querySelectorAll<HTMLButtonElement>(".control").forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode);
   });
@@ -110,7 +116,7 @@ function updateModeUI(mode: DemoMode): void {
 
 function setMode(mode: DemoMode, triggerPreset = false): void {
   scene.setMode(mode);
-  hint.textContent = hints[mode];
+  hintElement.textContent = hints[mode];
   lastReplayStage = "";
   updateModeUI(mode);
   if (triggerPreset && mode !== "observe") scene.triggerPreset(mode);
@@ -136,10 +142,10 @@ sceneElement.addEventListener("pointerdown", (event) => {
 function frame(now: number): void {
   scene.render(now);
 
-  const replayStatus = scene.getCanonicalReplayStatus(now);
-  if (replayStatus && replayStatus.stage.id !== lastReplayStage) {
-    hint.textContent = `${replayStatus.stage.label} — ${replayStatus.stage.description}`;
-    lastReplayStage = replayStatus.stage.id;
+  const currentReplayStatus = scene.getCanonicalReplayStatus(now);
+  if (currentReplayStatus && currentReplayStatus.stage.id !== lastReplayStage) {
+    hintElement.textContent = `${currentReplayStatus.stage.label} — ${currentReplayStatus.stage.description}`;
+    lastReplayStage = currentReplayStatus.stage.id;
   }
 
   if (scene.getMode() === "observe" && now - lastInteraction > 2600) {
