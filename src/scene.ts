@@ -1,11 +1,17 @@
 import * as d3 from "d3";
 
 import { makeFixtureCrystal, type CrystalCell } from "./model";
+import {
+  canonicalFiniteBudgetReplay,
+  replayStatus,
+  type AxialCell,
+  type ReplayStatus,
+} from "./replay";
 
 export type DemoMode = "observe" | "intervene" | "damage" | "history";
 
 interface ActiveEvent {
-  kind: Exclude<DemoMode, "observe">;
+  kind: "damage" | "history";
   x: number;
   y: number;
   startedAt: number;
@@ -23,6 +29,7 @@ export class CrystalScene {
   private height = 0;
   private dpr = 1;
   private event: ActiveEvent | null = null;
+  private replayStartedAt: number | null = null;
   private mode: DemoMode = "observe";
 
   constructor(canvas: HTMLCanvasElement, svg: SVGSVGElement) {
@@ -48,11 +55,23 @@ export class CrystalScene {
 
   setMode(mode: DemoMode): void {
     this.mode = mode;
-    if (mode === "observe") this.event = null;
+    this.event = null;
+    if (mode !== "intervene") this.replayStartedAt = null;
   }
 
   getMode(): DemoMode {
     return this.mode;
+  }
+
+  getCanonicalReplayStatus(now: number): ReplayStatus | null {
+    if (this.mode !== "intervene" || this.replayStartedAt === null) return null;
+    return replayStatus(canonicalFiniteBudgetReplay, this.replayStartedAt, now);
+  }
+
+  startCanonicalReplay(now = performance.now()): void {
+    this.mode = "intervene";
+    this.event = null;
+    this.replayStartedAt = now;
   }
 
   resize(width: number, height: number): void {
@@ -69,11 +88,21 @@ export class CrystalScene {
 
   trigger(x: number, y: number, now = performance.now()): void {
     if (this.mode === "observe") return;
+    if (this.mode === "intervene") {
+      this.startCanonicalReplay(now);
+      return;
+    }
     this.event = { kind: this.mode, x, y, startedAt: now };
   }
 
   triggerPreset(kind: Exclude<DemoMode, "observe">, now = performance.now()): void {
+    if (kind === "intervene") {
+      this.startCanonicalReplay(now);
+      return;
+    }
+
     this.mode = kind;
+    this.replayStartedAt = null;
     const hexSize = this.hexSize();
     const x = this.width / 2 + hexSize * Math.sqrt(3) * 2.2;
     const y = this.height / 2 - hexSize * 8.5;
@@ -81,6 +110,15 @@ export class CrystalScene {
   }
 
   render(now: number): void {
+    if (this.mode === "intervene" && this.replayStartedAt !== null) {
+      this.renderCanonicalReplay(now);
+      return;
+    }
+
+    this.renderFixture(now);
+  }
+
+  private renderFixture(now: number): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
@@ -99,13 +137,6 @@ export class CrystalScene {
       let stroke = cell.kind === "frontier" ? "rgba(212,225,239,0.52)" : "rgba(149,172,195,0.26)";
       let scale = 0.9 + Math.sin(now * 0.001 + cell.phase) * 0.025;
 
-      if (active?.kind === "intervene" && localDistance < size * 4.2) {
-        const wave = Math.max(0, 1 - localDistance / (size * 4.2));
-        fill = `rgba(73,150,255,${0.18 + wave * 0.46})`;
-        stroke = `rgba(116,180,255,${0.5 + wave * 0.4})`;
-        scale += wave * 0.08 * Math.sin(elapsed * 0.012 - localDistance * 0.12);
-      }
-
       if (active?.kind === "damage" && localDistance < size * 4.5) {
         const recovery = Math.max(0, Math.min(1, (elapsed - 1200) / 3200));
         alpha *= recovery;
@@ -123,7 +154,80 @@ export class CrystalScene {
     }
 
     this.drawFrontierActivity(now, centerX, centerY, size);
-    this.renderOverlay(now, centerX, centerY, size);
+    this.renderFixtureOverlay(now, size);
+  }
+
+  private renderCanonicalReplay(now: number): void {
+    if (this.replayStartedAt === null) return;
+
+    const replay = canonicalFiniteBudgetReplay;
+    const status = replayStatus(replay, this.replayStartedAt, now);
+    const stage = status.stage.id;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    const centerX = this.width / 2;
+    const centerY = this.height / 2 + Math.min(30, this.height * 0.035);
+    const size = this.hexSize();
+    const occupied = replay.checkpoint.occupied;
+    const showIntervention = stage !== "checkpoint";
+    const frontier = stage === "checkpoint" ? replay.frontier.prevent : replay.frontier.force;
+    const stageProgress = Math.max(0, Math.min(1, status.stageElapsedMs / Math.max(1, status.stage.durationMs)));
+
+    for (const cell of occupied) {
+      const p = this.axialToPixel(cell[0], cell[1], size, centerX, centerY);
+      const pulse = 0.72 + Math.sin(now * 0.0014 + cell[0] * 0.41 + cell[1] * 0.27) * 0.035;
+      this.drawHex(
+        p.x,
+        p.y,
+        size * 0.9,
+        "rgba(110,135,163,0.2)",
+        "rgba(149,172,195,0.3)",
+        pulse,
+      );
+    }
+
+    if (showIntervention) {
+      const [q, r] = replay.intervention.cell;
+      const p = this.axialToPixel(q, r, size, centerX, centerY);
+      const arrival = Math.min(1, stageProgress * 3);
+      this.drawHex(
+        p.x,
+        p.y,
+        size * (0.9 + arrival * 0.08),
+        `rgba(73,150,255,${0.2 + arrival * 0.48})`,
+        `rgba(130,193,255,${0.55 + arrival * 0.4})`,
+        1,
+      );
+    }
+
+    for (const cell of frontier) {
+      const p = this.axialToPixel(cell[0], cell[1], size, centerX, centerY);
+      this.drawHex(
+        p.x,
+        p.y,
+        size * 0.86,
+        "rgba(235,242,250,0.02)",
+        "rgba(212,225,239,0.28)",
+        0.9,
+      );
+    }
+
+    if (stage === "finite") {
+      for (const cell of replay.finiteBudget.forceSelected) {
+        const p = this.axialToPixel(cell[0], cell[1], size, centerX, centerY);
+        this.drawCandidateDot(p.x, p.y, size * 0.16, "rgba(112,174,255,0.72)");
+      }
+    }
+
+    if (stage === "full") {
+      for (const cell of frontier) {
+        const p = this.axialToPixel(cell[0], cell[1], size, centerX, centerY);
+        this.drawCandidateDot(p.x, p.y, size * 0.1, "rgba(193,215,240,0.48)");
+      }
+    }
+
+    this.renderCanonicalOverlay(status, centerX, centerY, size);
   }
 
   private hexSize(): number {
@@ -158,6 +262,14 @@ export class CrystalScene {
     ctx.restore();
   }
 
+  private drawCandidateDot(x: number, y: number, radius: number, fill: string): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+
   private drawFrontierActivity(now: number, cx: number, cy: number, size: number): void {
     const ctx = this.ctx;
     const frontier = this.cells.filter((cell) => cell.kind === "frontier");
@@ -172,25 +284,17 @@ export class CrystalScene {
     });
   }
 
-  private renderOverlay(now: number, cx: number, cy: number, size: number): void {
+  private renderFixtureOverlay(now: number, size: number): void {
     const active = this.event;
     if (!active) {
-      this.causalCircle.attr("opacity", 0);
-      this.eventLabel.attr("opacity", 0);
-      this.farFieldLayer.selectAll("circle").remove();
+      this.clearOverlay();
       return;
     }
 
     const elapsed = now - active.startedAt;
     const eventAge = Math.min(1, elapsed / 650);
     const fade = elapsed > 7000 ? Math.max(0, 1 - (elapsed - 7000) / 1600) : 1;
-
-    const label =
-      active.kind === "intervene"
-        ? "LOCAL INTERVENTION"
-        : active.kind === "damage"
-          ? "MATERIAL REMOVED"
-          : "HISTORY IMPRINT";
+    const label = active.kind === "damage" ? "MATERIAL REMOVED" : "HISTORY IMPRINT";
 
     this.causalCircle
       .attr("cx", active.x)
@@ -204,31 +308,69 @@ export class CrystalScene {
       .attr("opacity", 0.9 * fade)
       .text(label);
 
-    if (active.kind !== "intervene") {
+    this.farFieldLayer.selectAll("circle").remove();
+  }
+
+  private renderCanonicalOverlay(status: ReplayStatus, cx: number, cy: number, size: number): void {
+    const replay = canonicalFiniteBudgetReplay;
+    const stage = status.stage.id;
+
+    if (stage === "checkpoint") {
+      this.clearOverlay();
+      return;
+    }
+
+    const intervention = this.axialToPixel(
+      replay.intervention.cell[0],
+      replay.intervention.cell[1],
+      size,
+      cx,
+      cy,
+    );
+
+    this.causalCircle
+      .attr("cx", intervention.x)
+      .attr("cy", intervention.y)
+      .attr("r", size * 2.45)
+      .attr("opacity", 0.78);
+
+    const label = stage === "finite"
+      ? `FINITE B = ${replay.finiteBudget.budget}`
+      : stage === "full"
+        ? "FULL / UNBOUNDED · FAR = 0"
+        : "LOCAL INTERVENTION";
+
+    this.eventLabel
+      .attr("x", intervention.x)
+      .attr("y", intervention.y - size * 3.2)
+      .attr("opacity", 0.94)
+      .text(label);
+
+    if (stage !== "finite") {
       this.farFieldLayer.selectAll("circle").remove();
       return;
     }
 
-    const radius = size * 18.4;
-    const points = d3.range(8).map((index) => {
-      const angle = -Math.PI * 0.92 + index * (Math.PI * 1.84 / 7);
-      const drift = Math.sin(elapsed * 0.001 + index * 2.1) * size * 0.7;
-      return {
-        x: cx + Math.cos(angle) * (radius + drift),
-        y: cy + Math.sin(angle) * (radius * 0.66 + drift * 0.25),
-        kind: index % 3 === 0 ? "out" : "in",
-        delay: index * 150,
-      };
-    });
+    const points = [
+      ...replay.finiteBudget.farSwappedOut.map((cell) => ({ cell, kind: "out" as const })),
+      ...replay.finiteBudget.farSwappedIn.map((cell) => ({ cell, kind: "in" as const })),
+    ];
+    const reveal = Math.max(0, Math.min(1, status.stageElapsedMs / 700));
 
     this.farFieldLayer
-      .selectAll<SVGCircleElement, (typeof points)[number]>("circle")
-      .data(points)
+      .selectAll<SVGCircleElement, { cell: AxialCell; kind: "in" | "out" }>("circle")
+      .data(points, (point) => `${point.kind}:${point.cell[0]},${point.cell[1]}`)
       .join("circle")
       .attr("class", (point) => `far-field ${point.kind}`)
-      .attr("cx", (point) => point.x)
-      .attr("cy", (point) => point.y)
-      .attr("r", (point) => 4 + Math.max(0, Math.min(1, (elapsed - point.delay) / 500)) * 4)
-      .attr("opacity", (point) => Math.max(0, Math.min(0.9, (elapsed - point.delay) / 420)) * fade);
+      .attr("cx", (point) => this.axialToPixel(point.cell[0], point.cell[1], size, cx, cy).x)
+      .attr("cy", (point) => this.axialToPixel(point.cell[0], point.cell[1], size, cx, cy).y)
+      .attr("r", 4 + reveal * 4)
+      .attr("opacity", reveal * 0.95);
+  }
+
+  private clearOverlay(): void {
+    this.causalCircle.attr("opacity", 0);
+    this.eventLabel.attr("opacity", 0);
+    this.farFieldLayer.selectAll("circle").remove();
   }
 }
